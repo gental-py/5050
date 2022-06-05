@@ -28,6 +28,7 @@ class Messages:
         connected = "<server:connected"
         authorized = "<server:authorized"
         unauthorized = "<server:unauthorized"
+        handshake = "<server:handshake"
         admin_elevated = "<server:elevated"
         admin_notElevated = "<server:not.elevated"
         admin_addr = "<server:address|"
@@ -39,6 +40,7 @@ class Messages:
         disconnect = ">client:disconnect"
         elevate = ">client:elevate.admin|"
         degrad = ">client:degrad.admin"
+        handshake = ">client:handshake"
         admin_getaddr = ">admin:get.addr"
         admin_getactive_connections = ">admin:active.connections"
         admin_close_server = ">admin:close.server|"
@@ -77,6 +79,11 @@ def ReceiveMessage():
                     # Confirm message receipt.
                     elif command == Messages.FromServer.msg_received:
                         _messageReceived = True
+
+                    # Handshake response.
+                    elif command == Messages.FromServer.handshake:
+                        print("Handshake sent back.\n")
+                        SendMessage(Messages.ToServer.handshake)
 
                     # Server closed.
                     elif command == Messages.FromServer.server_closed:

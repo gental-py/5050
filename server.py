@@ -1,4 +1,3 @@
-from multiprocessing import Lock
 import threading as t
 import socket as s
 import time
@@ -42,6 +41,7 @@ class Messages:
         connected = "<server:connected;"
         authorized = "<server:authorized;"
         unauthorized = "<server:unauthorized;"
+        handshake = "<server:handshake;"
         admin_elevated = "<server:elevated;"
         admin_notElevated = "<server:not.elevated;"
         admin_addr = "<server:address|"
@@ -53,12 +53,15 @@ class Messages:
         disconnect = ">client:disconnect"
         elevate = ">client:elevate.admin|"
         degrad = ">client:degrad.admin"
+        handshake = ">client:handshake"
         admin_getaddr = ">admin:get.addr"
         admin_getactive_connections = ">admin:active.connections"
         admin_close_server = ">admin:close.server|"
 
 
 # Important variables
+_HandshakeResponse = False
+_HandshakeKick = False
 _EndOfWatch = False
 
 # Users. (addr[0]&addr[1]) -> 172.26.224.1&12345
@@ -74,8 +77,38 @@ server = s.socket(s.AF_INET, s.SOCK_STREAM)
 server.bind(ADDRESS)
 
 
+def Handshaker(connection, addr):
+    global _HandshakeKick, _HandshakeResponse
+
+    while True:
+        time.sleep(3)
+        try:
+            connection.send(Messages.FromServer.handshake.encode())
+            print("HS: Hand sent.")
+
+        except Exception as e:
+            print(f"{gray}[{purple}SERVER{gray}:{yellow}Handshaker{gray}] {addr[0]}:{addr[1]} {red}Kicked client due error: {e}{end}.")
+            _HandshakeKick = True
+            connection.close()
+            return
+
+        time.sleep(3)
+
+        if _HandshakeResponse:
+            _HandshakeResponse = False
+        else:
+            print(f"{gray}[{purple}SERVER{gray}:{yellow}Handshaker{gray}] {addr[0]}:{addr[1]} {red}Kicked client for no response{end}.")
+            _HandshakeKick = True
+            connection.close()
+            return
+
+
 def HandleClient(connection, addr):
-    global thread, server, _Admins, _Clients, SERVER, PORT, _EndOfWatch
+    global thread, server, _Admins, _Clients, SERVER, PORT, _EndOfWatch, _HandshakeKick, _HandshakeResponse
+
+    handshaker_thread = t.Thread(target=Handshaker, args=(connection,addr))
+    handshaker_thread.start()
+
     try:
 
         # Send connection confirmation.
@@ -104,6 +137,11 @@ def HandleClient(connection, addr):
         client_IsAdmin = False
         connected = True
         while connected:
+
+            if _HandshakeKick:
+                connection.close()
+                connected = False
+
             msg_lenght = connection.recv(HEADER).decode(FORMAT)
 
             if msg_lenght:
@@ -121,6 +159,11 @@ def HandleClient(connection, addr):
 
                     if f"{addr[0]}&{addr[1]}" in _Clients: _Clients.remove(f"{addr[0]}&{addr[1]}") 
                     connected = False
+
+                # Handshake.
+                elif MESSAGE == Messages.ToServer.handshake:
+                    print("HS: response received")
+                    _HandshakeResponse = True
 
                 # !ping
                 elif MESSAGE == Messages.ToServer.connection_test:
@@ -163,7 +206,7 @@ def HandleClient(connection, addr):
                     if client_IsAdmin:
                         msg_clients = "\n".join(client.replace("&", ":") for client in _Clients if client not in _Admins)
                         msg_admins  = "\n".join("*"+admin.replace("&", ":") for admin in _Admins) 
-                        msg_conns = Messages.FromServer.admin_active_connections + "  --@ Clients--\n" + msg_clients + "\n" + msg_admins
+                        msg_conns = Messages.FromServer.admin_active_connections + f" --@ Clients: {len(_Clients)}--\n" + msg_clients + "\n" + msg_admins + " "
         
                         connection.send(msg_conns.encode())
 
@@ -199,10 +242,10 @@ def HandleClient(connection, addr):
             if f"{addr[0]}&{addr[1]}" in _Clients: _Clients.remove(f"{addr[0]}&{addr[1]}") 
             connection.close()
             print(f"{gray}[{purple}SERVER{gray}:{yellow}ClientHandler:{red}ERROR{gray}]{end} Manually closed connection because client left without closing it.")
-            print(f"{gray}[{purple}SERVER{gray}:{yellow}ActiveConnections{gray}]{end} {green}{t.active_count() - 2}{end}")
             return False
 
         print(f"{gray}[{purple}SERVER{gray}:{yellow}ClientHandler:{red}ERROR{gray}]{end} Error: {e}")
+
 
 def Start():
     global _EndOfWatch, thread
@@ -219,7 +262,6 @@ def Start():
         conn, addr = server.accept()
         thread = t.Thread(target=HandleClient, args=(conn,addr))
         thread.start()
-        print(f"{gray}[{purple}SERVER{gray}:{yellow}ActiveConnections{gray}]{end} {green}{t.active_count() - 1}{end}")
 
 
 print(f"{gray}====== {green}SERVER STARTED{end} {gray}======{end}\n")
